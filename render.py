@@ -12,7 +12,8 @@ CATS_FOLDER    = "1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
 PURRING_FOLDER = "1hc7-oO4PeICXWPe6b07CFsDHOe8P4qz6"
 SUB_FILE_ID    = "1n-tXny5mhhYmeWEnZl_xi2aXWHnSAqGw"
 
-DURATION = random.randint(2400, 3600)  # 40–60 min
+VIDEO_INDEX = int(os.environ["VIDEO_INDEX"])
+DURATION    = random.randint(2400, 3600)  # 40–60 min
 
 # ── Setup dirs ────────────────────────────────────────────────────────────────
 TMP.mkdir(exist_ok=True)
@@ -30,8 +31,8 @@ gdown.download_folder(id=PURRING_FOLDER, output=str(TMP / "purring"), quiet=Fals
 print("Downloading subscribe button...")
 gdown.download(id=SUB_FILE_ID, output=str(TMP / "sub" / "sub.mp4"), quiet=False)
 
-# ── Pick one random video ─────────────────────────────────────────────────────
-videos = (
+# ── Pick video by index ───────────────────────────────────────────────────────
+videos = sorted(
     list((TMP / "cats").glob("*.mp4")) +
     list((TMP / "cats").glob("*.mov")) +
     list((TMP / "cats").glob("*.avi")) +
@@ -40,12 +41,15 @@ videos = (
 if not videos:
     raise SystemExit("No videos found in cats folder.")
 
-video_path = random.choice(videos)
-print(f"\n>>> VIDEO USED: {video_path.name}")
+if VIDEO_INDEX >= len(videos):
+    raise SystemExit(f"VIDEO_INDEX {VIDEO_INDEX} out of range — only {len(videos)} videos found.")
+
+video_path = videos[VIDEO_INDEX]
+print(f"\n>>> VIDEO USED: {video_path.name} (index {VIDEO_INDEX})")
 print(f">>> DURATION  : {DURATION}s ({DURATION//60}m {DURATION%60}s)\n")
 
 # ── Save video name for summary ───────────────────────────────────────────────
-(TMP / "video_name.txt").write_text(video_path.name)
+(TMP / f"video_name_{VIDEO_INDEX}.txt").write_text(video_path.name)
 
 # ── Try to get Drive file ID for video preview ────────────────────────────────
 try:
@@ -61,7 +65,7 @@ try:
             file_id = fid
             break
     if file_id:
-        (TMP / "video_id.txt").write_text(file_id)
+        (TMP / f"video_id_{VIDEO_INDEX}.txt").write_text(file_id)
         print(f">>> Drive file ID: {file_id}")
     else:
         print(">>> Could not extract Drive file ID")
@@ -80,7 +84,7 @@ if not songs:
 
 random.shuffle(songs)
 
-concat_audio = TMP / "concat_audio.txt"
+concat_audio = TMP / f"concat_audio_{VIDEO_INDEX}.txt"
 estimated_len = 200
 repeats = max(1, (DURATION // (len(songs) * estimated_len)) + 2)
 with open(concat_audio, "w") as f:
@@ -98,7 +102,7 @@ while t < DURATION - 10:
 enable_parts = "+".join([f"between(t,{s},{s+4})" for s in intervals])
 
 # ── Output path ───────────────────────────────────────────────────────────────
-output_path = TMP / f"OUT_{video_path.stem}.mp4"
+output_path = TMP / f"OUT_{VIDEO_INDEX}_{video_path.stem}.mp4"
 
 # ── FFmpeg ────────────────────────────────────────────────────────────────────
 filter_complex = (

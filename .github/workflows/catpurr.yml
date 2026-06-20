@@ -2,12 +2,53 @@ name: Render CatPurrASMR
 on:
   workflow_dispatch:
 jobs:
+  count_videos:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set_matrix.outputs.matrix }}
+    steps:
+      - name: Install deps
+        run: pip install gdown --break-system-packages
+      - name: Count videos in Drive
+        id: set_matrix
+        run: |
+          python3 << 'EOF'
+          import gdown
+          import json
+          from pathlib import Path
+
+          CATS_FOLDER = "1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
+          tmp = Path("/tmp/count")
+          tmp.mkdir(exist_ok=True)
+
+          gdown.download_folder(id=CATS_FOLDER, output=str(tmp), quiet=False, use_cookies=False)
+
+          videos = sorted(
+              list(tmp.glob("*.mp4")) +
+              list(tmp.glob("*.mov")) +
+              list(tmp.glob("*.avi")) +
+              list(tmp.glob("*.mkv"))
+          )
+
+          count = len(videos)
+          print(f"Found {count} videos")
+
+          indices = list(range(count))
+          matrix = json.dumps({"video_index": indices})
+
+          with open("/tmp/matrix.json", "w") as f:
+              f.write(matrix)
+
+          import subprocess
+          subprocess.run(["bash", "-c", f'echo "matrix={matrix}" >> $GITHUB_OUTPUT'])
+          EOF
+
   render:
+    needs: count_videos
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
-      matrix:
-        video_index: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+      matrix: ${{ fromJson(needs.count_videos.outputs.matrix) }}
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +81,7 @@ jobs:
             fi
             echo "> Delete **\`${VID_NAME}\`** from your [Google Drive cats folder](https://drive.google.com/drive/folders/${FOLDER_ID}) after downloading." >> $GITHUB_STEP_SUMMARY
           else
-            echo "## ⏭️ Job ${INDEX} — skipped (no video at this index)" >> $GITHUB_STEP_SUMMARY
+            echo "## ⏭️ Job ${INDEX} — skipped" >> $GITHUB_STEP_SUMMARY
           fi
       - name: Upload video as Release
         if: success()

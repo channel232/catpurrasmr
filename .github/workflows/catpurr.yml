@@ -5,6 +5,10 @@ jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    strategy:
+      matrix:
+        video_index: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
       - name: Install deps
@@ -13,16 +17,19 @@ jobs:
           sudo apt-get install -y ffmpeg --fix-missing
           pip install gdown --break-system-packages
       - name: Run render
+        env:
+          VIDEO_INDEX: ${{ matrix.video_index }}
         run: python render.py
       - name: Show video used in summary
         if: always()
         run: |
-          NAME_FILE="/tmp/catvids/video_name.txt"
-          ID_FILE="/tmp/catvids/video_id.txt"
+          INDEX=${{ matrix.video_index }}
+          NAME_FILE="/tmp/catvids/video_name_${INDEX}.txt"
+          ID_FILE="/tmp/catvids/video_id_${INDEX}.txt"
           FOLDER_ID="1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
           if [ -f "$NAME_FILE" ]; then
             VID_NAME=$(cat "$NAME_FILE")
-            echo "## 🐱 Video Used" >> $GITHUB_STEP_SUMMARY
+            echo "## 🐱 Job ${INDEX} — Video Used" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Filename:** \`${VID_NAME}\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -33,12 +40,17 @@ jobs:
             fi
             echo "> Delete **\`${VID_NAME}\`** from your [Google Drive cats folder](https://drive.google.com/drive/folders/${FOLDER_ID}) after downloading." >> $GITHUB_STEP_SUMMARY
           else
-            echo "## ❌ Render did not complete" >> $GITHUB_STEP_SUMMARY
+            echo "## ⏭️ Job ${INDEX} — skipped (no video at this index)" >> $GITHUB_STEP_SUMMARY
           fi
-      - name: Upload video
+      - name: Upload video as Release
         if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: catpurrasmr-${{ github.run_number }}
-          path: /tmp/catvids/OUT_*.mp4
-          retention-days: 1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VIDEO=$(ls /tmp/catvids/OUT_${{ matrix.video_index }}_*.mp4 2>/dev/null | head -n 1)
+          if [ -z "$VIDEO" ]; then exit 0; fi
+          TAG="run-${{ github.run_number }}-job-${{ matrix.video_index }}"
+          gh release create "$TAG" "$VIDEO" \
+            --title "CatPurrASMR Run ${{ github.run_number }} — Job ${{ matrix.video_index }}" \
+            --notes "Auto-generated render" \
+            --repo ${{ github.repository }}

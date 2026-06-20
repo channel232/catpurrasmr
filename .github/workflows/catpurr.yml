@@ -1,4 +1,4 @@
-name: Render Catvids
+name: Render CatPurrASMR
 on:
   workflow_dispatch:
 jobs:
@@ -14,10 +14,31 @@ jobs:
           pip install gdown --break-system-packages
       - name: Run render
         run: python render.py
+      - name: Show video used in summary
+        if: always()
+        run: |
+          NAME_FILE="/tmp/catvids/video_name.txt"
+          ID_FILE="/tmp/catvids/video_id.txt"
+          FOLDER_ID="1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
+          if [ -f "$NAME_FILE" ]; then
+            VID_NAME=$(cat "$NAME_FILE")
+            echo "## 🐱 Video Used" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Filename:** \`${VID_NAME}\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            if [ -f "$ID_FILE" ]; then
+              FILE_ID=$(cat "$ID_FILE")
+              echo "[![video preview](https://drive.google.com/thumbnail?id=${FILE_ID}&sz=w400)](https://drive.google.com/file/d/${FILE_ID}/view)" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "> Delete **\`${VID_NAME}\`** from your [Google Drive cats folder](https://drive.google.com/drive/folders/${FOLDER_ID}) after downloading." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Render did not complete" >> $GITHUB_STEP_SUMMARY
+          fi
       - name: Upload video
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: catvids-${{ github.run_number }}
+          name: catpurrasmr-${{ github.run_number }}
           path: /tmp/catvids/OUT_*.mp4
           retention-days: 1

@@ -1,6 +1,8 @@
 import os
 import random
 import subprocess
+import urllib.request
+import re
 from pathlib import Path
 import gdown
 
@@ -10,7 +12,7 @@ CATS_FOLDER    = "1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
 PURRING_FOLDER = "1hc7-oO4PeICXWPe6b07CFsDHOe8P4qz6"
 SUB_FILE_ID    = "1n-tXny5mhhYmeWEnZl_xi2aXWHnSAqGw"
 
-DURATION = random.randint(3600, 4800)  # 60–80 min
+DURATION = random.randint(2400, 3600)  # 40–60 min
 
 # ── Setup dirs ────────────────────────────────────────────────────────────────
 TMP.mkdir(exist_ok=True)
@@ -41,6 +43,30 @@ if not videos:
 video_path = random.choice(videos)
 print(f"\n>>> VIDEO USED: {video_path.name}")
 print(f">>> DURATION  : {DURATION}s ({DURATION//60}m {DURATION%60}s)\n")
+
+# ── Save video name for summary ───────────────────────────────────────────────
+(TMP / "video_name.txt").write_text(video_path.name)
+
+# ── Try to get Drive file ID for video preview ────────────────────────────────
+try:
+    req = urllib.request.Request(
+        f"https://drive.google.com/drive/folders/{CATS_FOLDER}",
+        headers={"User-Agent": "Mozilla/5.0"}
+    )
+    html = urllib.request.urlopen(req).read().decode("utf-8")
+    name_id_matches = re.findall(r'"(1[a-zA-Z0-9_-]{25,})"[^}]*?"([^"]+\.(?:mp4|mov|avi|mkv))"', html, re.IGNORECASE)
+    file_id = None
+    for fid, fname in name_id_matches:
+        if fname.lower() == video_path.name.lower():
+            file_id = fid
+            break
+    if file_id:
+        (TMP / "video_id.txt").write_text(file_id)
+        print(f">>> Drive file ID: {file_id}")
+    else:
+        print(">>> Could not extract Drive file ID")
+except Exception as e:
+    print(f">>> Drive ID lookup failed: {e}")
 
 # ── Shuffle purring audio ─────────────────────────────────────────────────────
 songs = (

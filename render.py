@@ -12,6 +12,15 @@ PURRING_FOLDER = "1hc7-oO4PeICXWPe6b07CFsDHOe8P4qz6"
 SUB_FILE_ID    = "1n-tXny5mhhYmeWEnZl_xi2aXWHnSAqGw"
 DURATION       = random.randint(2400, 3600)
 MAX_SIZE_BYTES = int(1.8 * 1024 * 1024 * 1024)
+CRF            = random.randint(21, 26)
+
+SUB_POSITION = random.choice(["bottom_left", "bottom_right", "bottom_center"])
+if SUB_POSITION == "bottom_left":
+    overlay_x = "30"
+elif SUB_POSITION == "bottom_center":
+    overlay_x = "(W-w)/2"
+else:
+    overlay_x = "W-w-30"
 
 VIDEO_INDEX = int(os.environ.get("VIDEO_INDEX", "0"))
 
@@ -105,8 +114,10 @@ if VIDEO_INDEX >= len(videos):
     raise SystemExit(f"VIDEO_INDEX {VIDEO_INDEX} out of range — only {len(videos)} videos found.")
 
 video_path = videos[VIDEO_INDEX]
-print(f"\n>>> VIDEO USED : {video_path.name} (index {VIDEO_INDEX})")
-print(f">>> DURATION   : {DURATION}s ({DURATION//60}m {DURATION%60}s) — stops at 1.8 GB\n")
+print(f"\n>>> VIDEO USED   : {video_path.name} (index {VIDEO_INDEX})")
+print(f">>> DURATION     : {DURATION}s ({DURATION//60}m {DURATION%60}s) — stops at 1.8 GB")
+print(f">>> CRF          : {CRF}")
+print(f">>> SUB POSITION : {SUB_POSITION}\n")
 
 (TMP / f"video_name_{VIDEO_INDEX}.txt").write_text(video_path.name)
 
@@ -145,7 +156,7 @@ filter_complex = (
     f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p[bg];"
     f"[1:v]scale=220:-1,"
     f"chromakey=0x00ff00:0.3:0.1[sub];"
-    f"[bg][sub]overlay=30:H-h-30:enable='{enable_parts}'[outv]"
+    f"[bg][sub]overlay={overlay_x}:H-h-30:enable='{enable_parts}'[outv]"
 )
 
 cmd = [
@@ -159,7 +170,7 @@ cmd = [
     "-map", "2:a",
     "-c:v", "libx264",
     "-preset", "fast",
-    "-crf", "23",
+    "-crf", str(CRF),
     "-c:a", "aac",
     "-b:a", "128k",
     "-ar", "44100",
@@ -208,9 +219,11 @@ final_size_gb = final_size / (1024 * 1024 * 1024)
 stop_reason   = "capped at 1.8 GB by size watcher" if stopped_by_watcher else "duration reached"
 
 print(f"\nDONE — {output_path}")
-print(f"Stop reason : {stop_reason}")
-print(f"Size        : {final_size_mb:.1f} MB ({final_size_gb:.3f} GB)")
-print(f"Video       : {video_path.name}")
+print(f"Stop reason  : {stop_reason}")
+print(f"CRF used     : {CRF}")
+print(f"Sub position : {SUB_POSITION}")
+print(f"Size         : {final_size_mb:.1f} MB ({final_size_gb:.3f} GB)")
+print(f"Video        : {video_path.name}")
 
 github_output = os.environ.get("GITHUB_OUTPUT")
 if github_output:
@@ -219,4 +232,5 @@ if github_output:
         f.write(f"video_name={video_path.name}\n")
         f.write(f"duration_seconds={DURATION}\n")
         f.write(f"final_size_mb={final_size_mb:.1f}\n")
-        
+        f.write(f"crf={CRF}\n")
+        f.write(f"sub_position={SUB_POSITION}\n")

@@ -1,97 +1,154 @@
 name: Render CatPurrASMR
+
 on:
   workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
-  count_videos:
+  discover:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set_matrix.outputs.matrix }}
+      matrix: ${{ steps.discover.outputs.matrix }}
+      has_work: ${{ steps.discover.outputs.has_work }}
     steps:
-      - name: Install deps
+      - name: Install gdown
         run: pip install gdown --break-system-packages
-      - name: Count videos in Drive
-        id: set_matrix
+
+      - name: Discover videos in Drive folder
+        id: discover
         run: |
           python3 << 'EOF'
-          import gdown
-          import json
+          import json, os, sys, time
           from pathlib import Path
+          import gdown
 
           CATS_FOLDER = "1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
-          tmp = Path("/tmp/count")
-          tmp.mkdir(exist_ok=True)
+          TMP_DIR = Path("/tmp/discover_catvids")
+          TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-          gdown.download_folder(id=CATS_FOLDER, output=str(tmp), quiet=False, use_cookies=False)
+          print("Downloading cats folder to discover videos...")
+          for attempt in range(3):
+              try:
+                  gdown.download_folder(id=CATS_FOLDER, output=str(TMP_DIR), quiet=False, use_cookies=False)
+                  break
+              except Exception as e:
+                  print(f"Attempt {attempt+1} failed: {e}")
+                  if attempt == 2:
+                      print("ERROR: all retries failed", file=sys.stderr)
+                      sys.exit(1)
+                  time.sleep(30)
 
           videos = sorted(
-              list(tmp.glob("*.mp4")) +
-              list(tmp.glob("*.mov")) +
-              list(tmp.glob("*.avi")) +
-              list(tmp.glob("*.mkv"))
+              list(TMP_DIR.glob("*.mp4")) +
+              list(TMP_DIR.glob("*.mov")) +
+              list(TMP_DIR.glob("*.avi")) +
+              list(TMP_DIR.glob("*.mkv"))
           )
 
-          count = len(videos)
-          print(f"Found {count} videos")
+          if not videos:
+              print("ERROR: no videos found in Drive folder.", file=sys.stderr)
+              sys.exit(1)
 
-          indices = list(range(count))
+          print(f"Found {len(videos)} videos:")
+          for i, v in enumerate(videos):
+              print(f"  [{i}] {v.name}")
+
+          indices = list(range(len(videos)))
           matrix = json.dumps({"video_index": indices})
 
-          with open("/tmp/matrix.json", "w") as f:
-              f.write(matrix)
-
-          import subprocess
-          subprocess.run(["bash", "-c", f'echo "matrix={matrix}" >> $GITHUB_OUTPUT'])
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          with open(github_output, "a") as f:
+              f.write(f"matrix={matrix}\n")
+              f.write(f"has_work=true\n")
           EOF
 
   render:
-    needs: count_videos
+    needs: discover
+    if: needs.discover.outputs.has_work == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
-      matrix: ${{ fromJson(needs.count_videos.outputs.matrix) }}
+      max-parallel: 1
       fail-fast: false
+      matrix:
+        video_index: ${{ fromJson(needs.discover.outputs.matrix).video_index }}
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
         run: |
-          sudo apt-get update
+          echo "=== Disk before cleanup ==="
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          docker system prune -af || true
+          echo "=== Disk after cleanup ==="
+          df -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
           sudo apt-get install -y ffmpeg --fix-missing
           pip install gdown --break-system-packages
+          ffmpeg -version | head -1
+          echo "All deps installed."
+
       - name: Run render
+        id: render
         env:
           VIDEO_INDEX: ${{ matrix.video_index }}
         run: python render.py
+
       - name: Show video used in summary
         if: always()
         run: |
           INDEX=${{ matrix.video_index }}
           NAME_FILE="/tmp/catvids/video_name_${INDEX}.txt"
-          ID_FILE="/tmp/catvids/video_id_${INDEX}.txt"
           FOLDER_ID="1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
+
           if [ -f "$NAME_FILE" ]; then
             VID_NAME=$(cat "$NAME_FILE")
             echo "## 🐱 Job ${INDEX} — Video Used" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Filename:** \`${VID_NAME}\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            if [ -f "$ID_FILE" ]; then
-              FILE_ID=$(cat "$ID_FILE")
-              echo "[![video preview](https://drive.google.com/thumbnail?id=${FILE_ID}&sz=w400)](https://drive.google.com/file/d/${FILE_ID}/view)" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-            fi
             echo "> Delete **\`${VID_NAME}\`** from your [Google Drive cats folder](https://drive.google.com/drive/folders/${FOLDER_ID}) after downloading." >> $GITHUB_STEP_SUMMARY
           else
-            echo "## ⏭️ Job ${INDEX} — skipped" >> $GITHUB_STEP_SUMMARY
+            echo "## ⏭️ Job ${INDEX} — skipped or failed" >> $GITHUB_STEP_SUMMARY
           fi
-      - name: Upload video as Release
+
+      - name: Create release and upload video
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VIDEO=$(ls /tmp/catvids/OUT_${{ matrix.video_index }}_*.mp4 2>/dev/null | head -n 1)
-          if [ -z "$VIDEO" ]; then exit 0; fi
-          TAG="run-${{ github.run_number }}-job-${{ matrix.video_index }}"
+          INDEX=${{ matrix.video_index }}
+          VIDEO=$(ls /tmp/catvids/OUT_${INDEX}_*.mp4 2>/dev/null | head -n 1)
+
+          if [ -z "$VIDEO" ]; then
+            echo "No output video found, skipping release."
+            exit 0
+          fi
+
+          TS=$(date -u +"%Y%m%d-%H%M%S")
+          TAG="catpurr-run${{ github.run_number }}-job${INDEX}-${TS}"
+          VID_NAME=$(basename "$VIDEO")
+
           gh release create "$TAG" "$VIDEO" \
-            --title "CatPurrASMR Run ${{ github.run_number }} — Job ${{ matrix.video_index }}" \
-            --notes "Auto-generated render" \
+            --title "CatPurrASMR — Run ${{ github.run_number }} Job ${INDEX}" \
+            --notes "**Video:** \`${VID_NAME}\`
+          **Run:** ${{ github.run_number }}
+          **Job index:** ${INDEX}
+          **Rendered:** $(date -u)" \
             --repo ${{ github.repository }}
+
+          echo "## ✅ Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**File:** \`${VID_NAME}\`" >> $GITHUB_STEP_SUMMARY
+          

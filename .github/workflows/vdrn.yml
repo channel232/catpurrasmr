@@ -1,11 +1,8 @@
-name: Render CatPurrASMR
-
+name: Render
 on:
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   discover:
     runs-on: ubuntu-latest
@@ -16,7 +13,7 @@ jobs:
       - name: Install gdown
         run: pip install gdown --break-system-packages
 
-      - name: Discover videos in Drive folder
+      - name: Discover
         id: discover
         run: |
           python3 << 'EOF'
@@ -28,7 +25,6 @@ jobs:
           TMP_DIR = Path("/tmp/discover_catvids")
           TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-          print("Downloading cats folder to discover videos...")
           for attempt in range(3):
               try:
                   gdown.download_folder(id=CATS_FOLDER, output=str(TMP_DIR), quiet=False, use_cookies=False)
@@ -36,7 +32,6 @@ jobs:
               except Exception as e:
                   print(f"Attempt {attempt+1} failed: {e}")
                   if attempt == 2:
-                      print("ERROR: all retries failed", file=sys.stderr)
                       sys.exit(1)
                   time.sleep(30)
 
@@ -48,20 +43,14 @@ jobs:
           )
 
           if not videos:
-              print("ERROR: no videos found in Drive folder.", file=sys.stderr)
               sys.exit(1)
-
-          print(f"Found {len(videos)} videos:")
-          for i, v in enumerate(videos):
-              print(f"  [{i}] {v.name}")
 
           indices = list(range(len(videos)))
           matrix = json.dumps({"video_index": indices})
 
-          github_output = os.environ.get("GITHUB_OUTPUT")
-          with open(github_output, "a") as f:
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"matrix={matrix}\n")
-              f.write(f"has_work=true\n")
+              f.write("has_work=true\n")
           EOF
 
   render:
@@ -74,55 +63,31 @@ jobs:
       fail-fast: false
       matrix:
         video_index: ${{ fromJson(needs.discover.outputs.matrix).video_index }}
-
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free up disk space
+      - name: Free disk space
         run: |
-          echo "=== Disk before cleanup ==="
-          df -h
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
           sudo apt-get clean
           docker system prune -af || true
-          echo "=== Disk after cleanup ==="
           df -h
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg --fix-missing
           pip install gdown --break-system-packages
-          ffmpeg -version | head -1
-          echo "All deps installed."
 
-      - name: Run render
+      - name: Run
         id: render
         env:
           VIDEO_INDEX: ${{ matrix.video_index }}
-        run: python render.py
+        run: python rndr.py
 
-      - name: Show video used in summary
-        if: always()
-        run: |
-          INDEX=${{ matrix.video_index }}
-          NAME_FILE="/tmp/catvids/video_name_${INDEX}.txt"
-          FOLDER_ID="1suKDbdX6DQcC76T3Xc0n6mJeZ9i_t7CH"
-
-          if [ -f "$NAME_FILE" ]; then
-            VID_NAME=$(cat "$NAME_FILE")
-            echo "## 🐱 Job ${INDEX} — Video Used" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Filename:** \`${VID_NAME}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "> Delete **\`${VID_NAME}\`** from your [Google Drive cats folder](https://drive.google.com/drive/folders/${FOLDER_ID}) after downloading." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## ⏭️ Job ${INDEX} — skipped or failed" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Create release and upload video
+      - name: Tag and Release
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -135,20 +100,12 @@ jobs:
             exit 0
           fi
 
-          TS=$(date -u +"%Y%m%d-%H%M%S")
-          TAG="catpurr-run${{ github.run_number }}-job${INDEX}-${TS}"
+          TS=$(date -u +"%Y%m%d_%H%M%S")
+          STEM=$(basename "$VIDEO" .mp4)
+          TAG="r_${STEM}_${TS}"
           VID_NAME=$(basename "$VIDEO")
 
           gh release create "$TAG" "$VIDEO" \
-            --title "CatPurrASMR — Run ${{ github.run_number }} Job ${INDEX}" \
-            --notes "**Video:** \`${VID_NAME}\`
-          **Run:** ${{ github.run_number }}
-          **Job index:** ${INDEX}
-          **Rendered:** $(date -u)" \
+            --title "${{ steps.render.outputs.final_size_mb }} MB" \
+            --notes "Job ${INDEX} — ${VID_NAME}" \
             --repo ${{ github.repository }}
-
-          echo "## ✅ Release Created" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tag:** \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**File:** \`${VID_NAME}\`" >> $GITHUB_STEP_SUMMARY
-          

@@ -85,7 +85,7 @@ jobs:
         id: render
         env:
           VIDEO_INDEX: ${{ matrix.video_index }}
-        run: python rndr.py
+        run: python flfl.py
 
       - name: Tag and Release
         if: success()
